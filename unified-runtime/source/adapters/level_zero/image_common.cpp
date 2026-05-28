@@ -1432,6 +1432,24 @@ ur_result_t urBindlessImagesImportExternalSemaphoreExp(
         return UR_RESULT_ERROR_INVALID_VALUE;
       }
       Win32ExpDesc.handle = Win32Handle->handle;
+    } else if (BaseDesc->stype == UR_STRUCTURE_TYPE_EXP_WIN32_NAME) {
+      SemDesc.pNext = &Win32ExpDesc;
+      auto Win32Name = static_cast<const ur_exp_win32_name_t *>(pNext);
+      switch (semHandleType) {
+      case UR_EXP_EXTERNAL_SEMAPHORE_TYPE_WIN32_NT:
+        SemDesc.flags = ZE_EXTERNAL_SEMAPHORE_EXT_FLAG_OPAQUE_WIN32;
+        break;
+      case UR_EXP_EXTERNAL_SEMAPHORE_TYPE_WIN32_NT_DX12_FENCE:
+        SemDesc.flags = ZE_EXTERNAL_SEMAPHORE_EXT_FLAG_D3D12_FENCE;
+        break;
+      case UR_EXP_EXTERNAL_SEMAPHORE_TYPE_TIMELINE_WIN32_NT:
+        SemDesc.flags =
+            ZE_EXTERNAL_SEMAPHORE_EXT_FLAG_VK_TIMELINE_SEMAPHORE_WIN32;
+        break;
+      default:
+        return UR_RESULT_ERROR_INVALID_VALUE;
+      }
+      Win32ExpDesc.name = static_cast<const char *>(Win32Name->name);
     }
     pNext = const_cast<void *>(BaseDesc->pNext);
   }

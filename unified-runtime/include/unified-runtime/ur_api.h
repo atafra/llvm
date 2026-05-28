@@ -620,6 +620,8 @@ typedef enum ur_structure_type_t {
   UR_STRUCTURE_TYPE_EXP_FILE_DESCRIPTOR = 0x2003,
   /// ::ur_exp_win32_handle_t
   UR_STRUCTURE_TYPE_EXP_WIN32_HANDLE = 0x2004,
+  /// ::ur_exp_win32_name_t
+  UR_STRUCTURE_TYPE_EXP_WIN32_NAME = 0x2008,
   /// ::ur_exp_sampler_addr_modes_t
   UR_STRUCTURE_TYPE_EXP_SAMPLER_ADDR_MODES = 0x2005,
   /// ::ur_exp_sampler_cubemap_properties_t
@@ -10011,6 +10013,19 @@ typedef struct ur_exp_win32_handle_t {
   void *handle;
 
 } ur_exp_win32_handle_t;
+
+///////////////////////////////////////////////////////////////////////////////
+/// @brief Windows specific named object
+typedef struct ur_exp_win32_name_t {
+  /// [in] type of this structure, must be
+  /// ::UR_STRUCTURE_TYPE_EXP_WIN32_NAME
+  ur_structure_type_t stype;
+  /// [in][optional] pointer to extension-specific structure
+  const void *pNext;
+  /// [in] A win32 named object (null-terminated string).
+  const void *name;
+
+} ur_exp_win32_name_t;
 
 ///////////////////////////////////////////////////////////////////////////////
 /// @brief Describes mipmap sampler properties
