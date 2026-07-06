@@ -37,18 +37,21 @@ static constexpr unsigned N = 16;
 static constexpr uint32_t DR = 1, DG = 2, DB = 3, DA = 4;
 
 int main() {
-  // 4 channels per pixel.
-  std::vector<uint32_t> InBuf(Width * Height * 4);
-  std::vector<uint32_t> OutBuf(Width * Height * 4, 0);
+  // 4 channels per pixel. UINT8 storage; UINT32 ESIMD registers - the typed
+  // gather/scatter convert UINT8 <-> UINT32 in hardware.
+  std::vector<uint8_t> InBuf(Width * Height * 4);
+  std::vector<uint8_t> OutBuf(Width * Height * 4, 0);
 
-  // Initialize the input image with deterministic per-channel values.
+  // Initialize the input image with deterministic per-channel values. Keep
+  // values (plus the added constants below) within [0, 255] so the UINT8
+  // storage represents them exactly.
   for (unsigned y = 0; y < Height; ++y) {
     for (unsigned x = 0; x < Width; ++x) {
       unsigned Pixel = y * Width + x;
-      InBuf[Pixel * 4 + 0] = Pixel;          // R
-      InBuf[Pixel * 4 + 1] = Pixel + 100;    // G
-      InBuf[Pixel * 4 + 2] = Pixel + 200;    // B
-      InBuf[Pixel * 4 + 3] = Pixel + 300;    // A
+      InBuf[Pixel * 4 + 0] = Pixel % 200;          // R
+      InBuf[Pixel * 4 + 1] = (Pixel + 50) % 200;   // G
+      InBuf[Pixel * 4 + 2] = (Pixel + 100) % 200;  // B
+      InBuf[Pixel * 4 + 3] = (Pixel + 150) % 200;  // A
     }
   }
 
@@ -58,10 +61,10 @@ int main() {
 
   try {
     image<2> ImgIn(InBuf.data(), image_channel_order::rgba,
-                   image_channel_type::unsigned_int32,
+                   image_channel_type::unsigned_int8,
                    range<2>{Width, Height});
     image<2> ImgOut(OutBuf.data(), image_channel_order::rgba,
-                    image_channel_type::unsigned_int32,
+                    image_channel_type::unsigned_int8,
                     range<2>{Width, Height});
 
     // Each work-item processes N consecutive pixels of one image row.

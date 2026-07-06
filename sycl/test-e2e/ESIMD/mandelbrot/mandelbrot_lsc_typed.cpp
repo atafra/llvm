@@ -59,7 +59,9 @@ static int mandel(int ix, int iy) {
 }
 
 int main() {
-  std::vector<uint32_t> OutBuf(WIDTH * HEIGHT * 4, 0);
+  // UINT8 storage (1 byte/channel); the ESIMD registers are UINT32 - the typed
+  // store converts UINT32 -> UINT8 in hardware.
+  std::vector<uint8_t> OutBuf(WIDTH * HEIGHT * 4, 0);
 
   queue q(esimd_test::ESIMDSelector, esimd_test::createExceptionHandler());
   std::cout << "Running on "
@@ -67,7 +69,7 @@ int main() {
 
   try {
     image<2> ImgOut(OutBuf.data(), image_channel_order::rgba,
-                    image_channel_type::unsigned_int32,
+                    image_channel_type::unsigned_int8,
                     range<2>{WIDTH, HEIGHT});
 
     range<2> GlobalRange{WIDTH / N, HEIGHT};
