@@ -12,6 +12,9 @@ See more general ESIMD documentation [here](./sycl_ext_intel_esimd.md).
 - [block_store(...) - fast store to a contiguous memory block](#block-store---fast-store-to-a-contiguous-memory-block)
 - [gather(...)](#gather---load-from-memory-locations-addressed-by-a-vector-of-offsets)
 - [scatter(...)](#scatter---store-to-memory-locations-addressed-by-a-vector-of-offsets)
+- [gather_rgba_typed(...) - read RGBA pixels from a typed image surface](#gather_rgba_typed---read-rgba-pixels-from-a-typed-image-surface)
+- [scatter_rgba_typed(...) - write RGBA pixels to a typed image surface](#scatter_rgba_typed---write-rgba-pixels-to-a-typed-image-surface)
+- [lsc_gather_rgba_typed / lsc_scatter_rgba_typed / lsc_prefetch_rgba_typed - Xe2+ typed image access](#lsc_gather_rgba_typed--lsc_scatter_rgba_typed--lsc_prefetch_rgba_typed---xe2-typed-image-access)
 - [load_2d(...) - load 2D block](#load_2d---load-2d-block)
 - [prefetch_2d(...) - prefetch 2D block](#prefetch_2d---prefetch-2d-block)
 - [store_2d(...) - store 2D block](#store_2d---store-2d-block)
@@ -29,14 +32,14 @@ See more general ESIMD documentation [here](./sycl_ext_intel_esimd.md).
 ## Stateless/stateful memory mode
 ESIMD functions have two memory assumption modes: `stateful` and `stateless`.
 `Stateless` read/write/prefetch uses a pointer to global memory,
-which also may be adjusted by a scalar/vector 64-bit offset.  
+which also may be adjusted by a scalar/vector 64-bit offset.
 `Stateful` read/write/prefetch accesses memory using a
 `surface-index` and a `32-bit` scalar/vector offset.
 
 The `-fsycl-esimd-force-stateless-mem` compilation option (which is ON by default)
 forces the translation of ESIMD memory API functions to `stateless` accesses.
 In this mode the ESIMD functions that accept a byte-offset argument accept it as
-any integral type scalar/vector.  
+any integral type scalar/vector.
 The `-fno-sycl-esimd-force-stateless-mem` compilation option may be used to translate
 ESIMD functions accepting a `SYCL device accessor` to `stateful` accesses. In this case
 the corresponding ESIMD functions accept only 32-bit scalar/vector byte offsets.
@@ -66,7 +69,7 @@ properties props{cache_hint_L1<cache_hint::uncached>, alignment<4> cache_hint_L1
 auto vec_b = block_load<float, 16>(f32_ptr + 1, props);
 ```
 ### Cache-hint properties
-Cache-hint properties (if passed) currently add a restriction on the target-device, it must be a Intel® Arc Series (aka DG2) or Intel® Data Center GPU Max Series (aka PVC).  
+Cache-hint properties (if passed) currently add a restriction on the target-device, it must be a Intel® Arc Series (aka DG2) or Intel® Data Center GPU Max Series (aka PVC).
 The valid combinations of L1/L2 cache-hints depend on the usage context.. There are 4 contexts:
 * load: `block_load()`, `load_2d()`, `gather()` functions;
 * prefetch: `prefetch()` and `prefetch_2d()` functions;
@@ -152,12 +155,12 @@ template <typename T, int N, typename PropertyListT = empty_properties_t>
 } // end namespace sycl::ext::intel::esimd
 ```
 ### Description
-`(usm-bl-*)`: Loads a contiguous memory block from global memory referenced by the USM pointer `ptr` optionally adjusted by `byte_offset`.  
-`(acc-bl-*)`, `(lacc-bl-*)`: Loads a contiguous memory block from the memory referenced by the accessor optionally adjusted by `byte_offset`.  
-`(slm-bl-*)`: Loads a contiguous memory block from the shared local memory referenced by `byte_offset`.  
-The optional parameter `byte_offset` has a scalar integer 64-bit type for `(usm-bl-*)`, 32-bit type for `(lacc-bl-*)` and `(slm-bl-*)`, 32-bit for `(acc-bl-*)` in [stateful](#statelessstateful-memory-mode) mode, and 64-bit for `(acc-bl-*)` in [stateless](#statelessstateful-memory-mode) mode.  
-The optional parameter `pred` provides a 1-element `simd_mask`. If zero mask is passed, then the load is skipped and the `pass_thru` value is returned.  
-If `pred` is zero and the `pass_thru` operand was not passed, then the function returns an undefined value.  
+`(usm-bl-*)`: Loads a contiguous memory block from global memory referenced by the USM pointer `ptr` optionally adjusted by `byte_offset`.
+`(acc-bl-*)`, `(lacc-bl-*)`: Loads a contiguous memory block from the memory referenced by the accessor optionally adjusted by `byte_offset`.
+`(slm-bl-*)`: Loads a contiguous memory block from the shared local memory referenced by `byte_offset`.
+The optional parameter `byte_offset` has a scalar integer 64-bit type for `(usm-bl-*)`, 32-bit type for `(lacc-bl-*)` and `(slm-bl-*)`, 32-bit for `(acc-bl-*)` in [stateful](#statelessstateful-memory-mode) mode, and 64-bit for `(acc-bl-*)` in [stateless](#statelessstateful-memory-mode) mode.
+The optional parameter `pred` provides a 1-element `simd_mask`. If zero mask is passed, then the load is skipped and the `pass_thru` value is returned.
+If `pred` is zero and the `pass_thru` operand was not passed, then the function returns an undefined value.
 The optional [compile-time properties](#compile-time-properties) list `props` may specify `alignment` and/or `cache-hints`. The cache-hints are ignored for `(lacc-bl-*)` and `(slm-bl-*)` functions.
 
 ### Restrictions/assumptions:
@@ -224,11 +227,11 @@ template <typename T, int N, typename PropertyListT = empty_properties_t>
 } // end namespace sycl::ext::intel::esimd
 ```
 ### Description
-`(usm-bs-*)`: Stores `vals` to a contiguous global memory block referenced by the USM pointer `ptr` optionally adjusted by `byte_offset`.  
-`(acc-bs-*)`, `(lacc-bs-*)`: Stores `vals` to a contiguous memory block referenced by the accessor optionally adjusted by `byte_offset`.  
-`(slm-bs-*)`: Stores `vals` to a contiguous shared-local-memory block referenced by `byte_offset`.  
-The optional parameter `byte_offset` has a scalar integer 64-bit type for `(usm-bs-*)`, 32-bit type for `(lacc-bs-*)` and `(slm-bs-*)`, 32-bit for `(acc-bs-*)` in [stateful](#statelessstateful-memory-mode) mode, and 64-bit for `(acc-bs-*)` in [stateless](#statelessstateful-memory-mode) mode.  
-The optional parameter `pred` provides a 1-element `simd_mask`. If zero mask is passed, then the store is skipped.  
+`(usm-bs-*)`: Stores `vals` to a contiguous global memory block referenced by the USM pointer `ptr` optionally adjusted by `byte_offset`.
+`(acc-bs-*)`, `(lacc-bs-*)`: Stores `vals` to a contiguous memory block referenced by the accessor optionally adjusted by `byte_offset`.
+`(slm-bs-*)`: Stores `vals` to a contiguous shared-local-memory block referenced by `byte_offset`.
+The optional parameter `byte_offset` has a scalar integer 64-bit type for `(usm-bs-*)`, 32-bit type for `(lacc-bs-*)` and `(slm-bs-*)`, 32-bit for `(acc-bs-*)` in [stateful](#statelessstateful-memory-mode) mode, and 64-bit for `(acc-bs-*)` in [stateless](#statelessstateful-memory-mode) mode.
+The optional parameter `pred` provides a 1-element `simd_mask`. If zero mask is passed, then the store is skipped.
 The optional [compile-time properties](#compile-time-properties) list `props` may specify `alignment` and/or `cache-hints`. The cache-hints are ignored for `(lacc-bs-*)` and `(slm-bs-*)` functions.
 
 ### Restrictions/assumptions:
@@ -386,15 +389,15 @@ template <typename T, int N, int VS = 1, typename OffsetSimdViewT, typename Prop
 ```
 
 ### Description
-`(usm-ga-*)`: Loads ("gathers") elements of the type `T` from global memory locations addressed by the base USM pointer `p` and byte-offsets `byte_offsets`.  
-`(acc-ga-*)`, `(lacc-ga-*)`: Loads ("gathers") elements of the type `T` from memory locations addressed by the accessor and byte-offsets `byte_offsets`.  
-`(slm-ga-*)`: Loads ("gathers") elements of the type `T` from shared local memory locations addressed by `byte_offsets`.  
+`(usm-ga-*)`: Loads ("gathers") elements of the type `T` from global memory locations addressed by the base USM pointer `p` and byte-offsets `byte_offsets`.
+`(acc-ga-*)`, `(lacc-ga-*)`: Loads ("gathers") elements of the type `T` from memory locations addressed by the accessor and byte-offsets `byte_offsets`.
+`(slm-ga-*)`: Loads ("gathers") elements of the type `T` from shared local memory locations addressed by `byte_offsets`.
 The parameter `byte_offset` is a vector of any integral type elements for `(usm-ga-*)`, 32-bit integer elements for `(lacc-ga-*)` and `(slm-ga-*)`, any integral type integer elements for `(acc-ga-*)` in [stateless](#statelessstateful-memory-mode) mode(default),
-and up-to-32-bit integer elements for `(acc-ga-*)` in [stateful](#statelessstateful-memory-mode) mode.  
-The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the load of the corresponding memory location is skipped and the element of the result is copied from `pass_thru` (if it is passed) or it is undefined (if `pass_thru` is omitted).  
-The optional [compile-time properties](#compile-time-properties) list `props` may specify `alignment` and/or `cache-hints`. The cache-hints are ignored for `(lacc-*)` and `(slm-*)` functions.  
-The template parameter `N` can be any positive number.  
-The optional template parameter `VS` must be one of `{1, 2, 3, 4, 8, 16, 32, 64}` values. It specifies how many conseсutive elements are loaded per each element in `byte_offsets`.   
+and up-to-32-bit integer elements for `(acc-ga-*)` in [stateful](#statelessstateful-memory-mode) mode.
+The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the load of the corresponding memory location is skipped and the element of the result is copied from `pass_thru` (if it is passed) or it is undefined (if `pass_thru` is omitted).
+The optional [compile-time properties](#compile-time-properties) list `props` may specify `alignment` and/or `cache-hints`. The cache-hints are ignored for `(lacc-*)` and `(slm-*)` functions.
+The template parameter `N` can be any positive number.
+The optional template parameter `VS` must be one of `{1, 2, 3, 4, 8, 16, 32, 64}` values. It specifies how many conseсutive elements are loaded per each element in `byte_offsets`.
 ### Example
 ```C++
 simd<int64_t, 4> offsets(0, 100); // 0, 100, 200, 300 - offsets in bytes
@@ -490,15 +493,15 @@ template <typename T, int N, int VS = 1, typename OffsetSimdViewT, typename Prop
 ```
 
 ### Description
-`(usm-sc-*)`: Stores ("scatters") the vector `vals` to global memory locations addressed by the base USM pointer `p` and byte-offsets `byte_offsets`.  
-`(acc-sc-*)`, `(lacc-sc-*)`: Stores ("scatters") the vector `vals` to memory locations addressed by the the accessor and byte-offsets `byte_offsets`.  
-`(slm-sc-*)`: Stores ("scatters") the vector `vals` to shared local memory locations addressed by `byte_offsets`.  
+`(usm-sc-*)`: Stores ("scatters") the vector `vals` to global memory locations addressed by the base USM pointer `p` and byte-offsets `byte_offsets`.
+`(acc-sc-*)`, `(lacc-sc-*)`: Stores ("scatters") the vector `vals` to memory locations addressed by the the accessor and byte-offsets `byte_offsets`.
+`(slm-sc-*)`: Stores ("scatters") the vector `vals` to shared local memory locations addressed by `byte_offsets`.
 The parameter `byte_offset` is a vector of any integral type elements for `(usm-sc-*)`, 32-bit integer elements for `(lacc-sc-*)` and `(slm-sc-*)`, any integral type integer elements for `(acc-sc-*)` in [stateless](#statelessstateful-memory-mode) mode(default),
-and up-to-32-bit integer elements for `(acc-sc-*)` in [stateful](#statelessstateful-memory-mode) mode.  
-The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the store to the corresponding memory location is skipped.  
+and up-to-32-bit integer elements for `(acc-sc-*)` in [stateful](#statelessstateful-memory-mode) mode.
+The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the store to the corresponding memory location is skipped.
 The optional [compile-time properties](#compile-time-properties) list `props` may specify `alignment` and/or `cache-hints`. The cache-hints are ignored for `(lacc-sc-*)` and `(slm-sc-*)` functions.
-The template parameter `N` can be any positive number.  
-The optional template parameter `VS` must be one of `{1, 2, 3, 4, 8, 16, 32, 64}` values. It specifies how many conseсutive elements are written per each element in `byte_offsets`.   
+The template parameter `N` can be any positive number.
+The optional template parameter `VS` must be one of `{1, 2, 3, 4, 8, 16, 32, 64}` values. It specifies how many conseсutive elements are written per each element in `byte_offsets`.
 ### Example
 ```C++
 simd<int64_t, 4> offsets4(0, 100); // 0, 100, 200, 300 - offsets in bytes
@@ -525,6 +528,137 @@ scatter<float, 8, 2>(ptr, offsets4);
 | `(slm-sc-*)`, `(lacc-sc-*)` | !(cache-hints) and (`VS` == 1) and (`N` == 1,2,4,8,16,32) | Any Intel GPU |
 | `(slm-sc-*)`, `(lacc-sc-*)` | (cache-hints) or (`VS` > 1) or (`N` != 1,2,4,8,16,32) | DG2 or PVC |
 
+## gather_rgba_typed(...) - read RGBA pixels from a typed image surface
+
+```cpp
+// Read up to 4 32-bit channels (selected by RGBAMask) of N pixels of the image
+// bound to 'acc', addressing pixels by integer coordinates (u, v, r).
+template <typename T, int N,
+          rgba_channel_mask RGBAMask = rgba_channel_mask::ABGR,
+          typename AccessorT>
+/*ga-ty-1*/ simd<T, N * get_num_channels_enabled(RGBAMask)>
+gather_rgba_typed(AccessorT acc, simd<uint32_t, N> u, simd<uint32_t, N> v = 0,
+                  simd<uint32_t, N> r = 0, simd_mask<N> mask = 1);
+```
+
+### Description
+
+`gather_rgba_typed` is the typed-surface counterpart of `gather_rgba`. It reads
+up to 4 channels of each of the
+`N` pixels of the image bound to the accessor `acc`. Unlike `gather_rgba`, which
+addresses a buffer by byte offsets, `gather_rgba_typed` addresses a bound
+`sycl::image` by integer pixel coordinates `u` (X), `v` (Y) and `r` (Z); the
+hardware applies the image's format handling and out-of-bounds behavior. This is
+the ESIMD equivalent of the CM `read_typed` operation and maps to the
+`GATHER4_TYPED` (`llvm.genx.gather4.typed`) hardware message.
+
+The set of accessed channels is selected at compile time by `RGBAMask`. The
+returned vector is laid out channel-major: all `N` values of the lowest enabled
+channel come first, followed by all `N` values of the next enabled channel, etc.
+The pixels whose corresponding `mask` element is `0` are not accessed and their
+values in the returned vector are undefined.
+
+## scatter_rgba_typed(...) - write RGBA pixels to a typed image surface
+
+```cpp
+// Write up to 4 32-bit channels (selected by RGBAMask) of N pixels to the image
+// bound to 'acc', addressing pixels by integer coordinates (u, v, r).
+template <typename T, int N,
+          rgba_channel_mask RGBAMask = rgba_channel_mask::ABGR,
+          typename AccessorT>
+/*sc-ty-1*/ void
+scatter_rgba_typed(AccessorT acc, simd<uint32_t, N> u, simd<uint32_t, N> v,
+                   simd<uint32_t, N> r,
+                   simd<T, N * get_num_channels_enabled(RGBAMask)> vals,
+                   simd_mask<N> mask = 1);
+```
+
+### Description
+
+`scatter_rgba_typed` is the typed-surface counterpart of `scatter_rgba` and the
+write companion of
+`gather_rgba_typed`. It writes up to 4 channels of each of the `N` pixels to the
+image bound to `acc`, addressing pixels by integer coordinates `u`, `v`, `r`. The
+`vals` argument is laid out channel-major, matching the layout returned by
+`gather_rgba_typed`. This is the ESIMD equivalent of the CM `write_typed`
+operation and maps to the `SCATTER4_TYPED` (`llvm.genx.scatter4.typed`) hardware
+message.
+
+As with `scatter_rgba`, only channel masks covering a set of consecutive channels
+starting from `R` (i.e. `R`, `GR`, `BGR` or `ABGR`) are supported for writes. The
+pixels whose corresponding `mask` element is `0` are not written.
+
+### Restrictions
+
+| `Function` | `Condition` | Required Intel GPU |
+|-|-|-|
+| `(ga-ty-*)`, `(sc-ty-*)` | `sizeof(T)` == 4 and `N` == 8,16,32 and `acc` is an image accessor | Intel GPU up to (and including) PVC/DG2 (pre-Xe2) |
+
+> **Note**: `gather_rgba_typed`/`scatter_rgba_typed` map to the `GATHER4_TYPED`/
+> `SCATTER4_TYPED` dataport messages, which are **only available on pre-Xe2**
+> devices. On Xe2 and later use the LSC variants
+> `lsc_gather_rgba_typed`/`lsc_scatter_rgba_typed` (below).
+
+## lsc_gather_rgba_typed / lsc_scatter_rgba_typed / lsc_prefetch_rgba_typed - Xe2+ typed image access
+
+```cpp
+// Namespace: sycl::ext::intel::experimental::esimd
+// Read up to 4 32-bit channels (selected by RGBAMask) of N pixels of the image
+// bound to 'acc', addressed by integer pixel coordinates (u, v, r) and a
+// level-of-detail 'lod', with optional L1/L2 cache hints.
+template <typename T, int N,
+          rgba_channel_mask RGBAMask = rgba_channel_mask::ABGR,
+          cache_hint L1H = cache_hint::none, cache_hint L2H = cache_hint::none,
+          typename AccessorT>
+/*lsc-ga-ty-1*/ simd<T, N * get_num_channels_enabled(RGBAMask)>
+lsc_gather_rgba_typed(AccessorT acc, simd<uint32_t, N> u,
+                      simd<uint32_t, N> v = 0, simd<uint32_t, N> r = 0,
+                      simd<uint32_t, N> lod = 0, simd_mask<N> mask = 1);
+
+template <typename T, int N,
+          rgba_channel_mask RGBAMask = rgba_channel_mask::ABGR,
+          cache_hint L1H = cache_hint::none, cache_hint L2H = cache_hint::none,
+          typename AccessorT>
+/*lsc-sc-ty-1*/ void
+lsc_scatter_rgba_typed(AccessorT acc, simd<uint32_t, N> u, simd<uint32_t, N> v,
+                       simd<uint32_t, N> r, simd<uint32_t, N> lod,
+                       simd<T, N * get_num_channels_enabled(RGBAMask)> vals,
+                       simd_mask<N> mask = 1);
+
+template <typename T, int N,
+          rgba_channel_mask RGBAMask = rgba_channel_mask::ABGR,
+          cache_hint L1H = cache_hint::cached,
+          cache_hint L2H = cache_hint::cached, typename AccessorT>
+/*lsc-pf-ty-1*/ void
+lsc_prefetch_rgba_typed(AccessorT acc, simd<uint32_t, N> u,
+                        simd<uint32_t, N> v = 0, simd<uint32_t, N> r = 0,
+                        simd<uint32_t, N> lod = 0, simd_mask<N> mask = 1);
+```
+
+### Description
+
+These are the **Xe2 and later** LSC-message counterparts of
+`gather_rgba_typed`/`scatter_rgba_typed`, and the ESIMD equivalents of the CM
+`cm_load4_typed`/`cm_store4_typed`/`cm_prefetch4_typed` operations. They read,
+write or prefetch up to 4 channels of `N` pixels of a bound `sycl::image`,
+addressing pixels by integer coordinates `u` (X), `v` (Y), `r` (Z) and a
+per-pixel level-of-detail `lod`. In addition to the pre-Xe2 variants they accept
+L1/L2 `cache_hint`s and the LOD coordinate, and they lower to the LSC typed
+"quad" messages (`llvm.genx.lsc.load.merge.quad.typed.bti`,
+`llvm.genx.lsc.store.quad.typed.bti` and
+`llvm.genx.lsc.prefetch.quad.typed.bti`). The gathered/scattered data is laid out
+channel-major, exactly like the pre-Xe2 variants.
+
+As with the other RGBA write APIs, only channel masks covering a set of
+consecutive channels starting from `R` (i.e. `R`, `GR`, `BGR` or `ABGR`) are
+supported by `lsc_scatter_rgba_typed`.
+
+### Restrictions
+
+| `Function` | `Condition` | Required Intel GPU |
+|-|-|-|
+| `(lsc-ga-ty-*)`, `(lsc-sc-ty-*)`, `(lsc-pf-ty-*)` | `sizeof(T)` == 4 and `N` == 8,16,32 and `acc` is an image accessor | Xe2 or later |
+
 ## load_2d(...) - load 2D block
 ```C++
 template <typename T, int BlockWidth, int BlockHeight = 1, int NBlocks = 1,
@@ -535,20 +669,20 @@ simd<T, N> load_2d(const T *Ptr, unsigned SurfaceWidth, unsigned SurfaceHeight,
                    unsigned SurfacePitch, int X, int Y, PropertyListT props = {});
 ```
 ### Description
-Loads and returns a vector `simd<T, N>` where `N` is `BlockWidth * BlockHeight * NBlocks`.  
-`T` is element type.  
-`BlockWidth` - the block width in number of elements.  
-`BlockHeight` - the block height in number of elements.  
-`NBlocks` - the number of blocks.  
-`Transposed` - the transposed version or not.  
-`Transformed` - apply VNNI transform or not.  
-`N` - (automatically deduced) the size of the returned vector in elements.  
-`Ptr` - the surface base address for this operation.  
-`SurfaceWidth` - the surface width minus 1 in bytes.  
-`SurfaceHeight` - the surface height minus 1 in rows.  
-`SurfacePitch` - the surface pitch minus 1 in bytes.  
-`X` - zero based X-coordinate of the left upper rectangle corner in number of elements.  
-`Y` - zero based Y-coordinate of the left upper rectangle corner in rows.  
+Loads and returns a vector `simd<T, N>` where `N` is `BlockWidth * BlockHeight * NBlocks`.
+`T` is element type.
+`BlockWidth` - the block width in number of elements.
+`BlockHeight` - the block height in number of elements.
+`NBlocks` - the number of blocks.
+`Transposed` - the transposed version or not.
+`Transformed` - apply VNNI transform or not.
+`N` - (automatically deduced) the size of the returned vector in elements.
+`Ptr` - the surface base address for this operation.
+`SurfaceWidth` - the surface width minus 1 in bytes.
+`SurfaceHeight` - the surface height minus 1 in rows.
+`SurfacePitch` - the surface pitch minus 1 in bytes.
+`X` - zero based X-coordinate of the left upper rectangle corner in number of elements.
+`Y` - zero based Y-coordinate of the left upper rectangle corner in rows.
 `props` - The optional compile-time properties. Only cache hint properties are used.
 
 ### Restrictions
@@ -583,18 +717,18 @@ void prefetch_2d(const T *Ptr, unsigned SurfaceWidth, unsigned SurfaceHeight,
                  unsigned SurfacePitch, int X, int Y, PropertyListT props = {});
 ```
 ### Description
-Prefetches elements from a memory block of the size `BlockWidth * BlockHeight * NBlocks` to cache.  
-`T` is element type.  
-`BlockWidth` - the block width in number of elements.  
-`BlockHeight` - the block height in number of elements.  
-`NBlocks` - the number of blocks.  
-`N` - (automatically deduced) the size of the returned vector in elements.  
-`Ptr` - the surface base address for this operation.  
-`SurfaceWidth` - the surface width minus 1 in bytes.  
-`SurfaceHeight` - the surface height minus 1 in rows.  
-`SurfacePitch` - the surface pitch minus 1 in bytes.  
-`X` - zero based X-coordinate of the left upper rectangle corner in number of elements.  
-`Y` - zero based Y-coordinate of the left upper rectangle corner in rows.  
+Prefetches elements from a memory block of the size `BlockWidth * BlockHeight * NBlocks` to cache.
+`T` is element type.
+`BlockWidth` - the block width in number of elements.
+`BlockHeight` - the block height in number of elements.
+`NBlocks` - the number of blocks.
+`N` - (automatically deduced) the size of the returned vector in elements.
+`Ptr` - the surface base address for this operation.
+`SurfaceWidth` - the surface width minus 1 in bytes.
+`SurfaceHeight` - the surface height minus 1 in rows.
+`SurfacePitch` - the surface pitch minus 1 in bytes.
+`X` - zero based X-coordinate of the left upper rectangle corner in number of elements.
+`Y` - zero based Y-coordinate of the left upper rectangle corner in rows.
 `props` - The compile-time properties, which must specify cache-hints.
 
 ### Restrictions
@@ -616,17 +750,17 @@ void store_2d(T *Ptr, unsigned SurfaceWidth, unsigned SurfaceHeight,
 
 ```
 ### Description
-Stores the vector `Vals` of the type `simd<T, N>` to 2D memory block where `N` is `BlockWidth * BlockHeight`.  
-`T` is element type of the values to be stored to memory.  
-`BlockWidth` - the block width in number of elements.  
-`BlockHeight` - the block height in number of elements.  
-`N` - (automatically deduced) the size of the vector to be stored.  
-`Ptr` - the surface base address for this operation.  
-`SurfaceWidth` - the surface width minus 1 in bytes.  
-`SurfaceHeight` - the surface height minus 1 in rows.  
-`SurfacePitch` - the surface pitch minus 1 in bytes.  
-`X` - zero based X-coordinate of the left upper rectangle corner in number of elements.  
-`Y` - zero based Y-coordinate of the left upper rectangle corner in rows.  
+Stores the vector `Vals` of the type `simd<T, N>` to 2D memory block where `N` is `BlockWidth * BlockHeight`.
+`T` is element type of the values to be stored to memory.
+`BlockWidth` - the block width in number of elements.
+`BlockHeight` - the block height in number of elements.
+`N` - (automatically deduced) the size of the vector to be stored.
+`Ptr` - the surface base address for this operation.
+`SurfaceWidth` - the surface width minus 1 in bytes.
+`SurfaceHeight` - the surface height minus 1 in rows.
+`SurfacePitch` - the surface pitch minus 1 in bytes.
+`X` - zero based X-coordinate of the left upper rectangle corner in number of elements.
+`Y` - zero based Y-coordinate of the left upper rectangle corner in rows.
 `props` - The optional compile-time properties. Only cache hint properties are used.
 
 ### Restrictions
@@ -764,15 +898,15 @@ template <atomic_op Op, typename T, int N>
 } // end namespace sycl::ext::intel::esimd
 ```
 ### Description
-`(usm-*)`: Atomically updates the global memory locations addressed by the base USM pointer `ptr` and byte-offsets `byte_offset`.  
-`(acc-*)`, `(lacc-*)`: Atomically updates the memory locations addressed by the the accessor and byte-offsets `byte_offset`.  
-`(slm-*)`: Atomically updates the shared memory locations addressed by `byte_offset`.  
+`(usm-*)`: Atomically updates the global memory locations addressed by the base USM pointer `ptr` and byte-offsets `byte_offset`.
+`(acc-*)`, `(lacc-*)`: Atomically updates the memory locations addressed by the the accessor and byte-offsets `byte_offset`.
+`(slm-*)`: Atomically updates the shared memory locations addressed by `byte_offset`.
 The parameter `byte_offset` is a vector of any integral type elements for `(usm-*)`, 32-bit integer elements for `(lacc-*)` and `(slm-*)`, any integral type integer elements for `(acc-*)` in [stateless](#statelessstateful-memory-mode) mode(default),
-and up-to-32-bit integer elements for `(acc-*)` in [stateful](#statelessstateful-memory-mode) mode.  
-The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the corresponding memory location is not updated.  
-`(usm-*)`, `(acc-*)`: The optional [compile-time properties](#compile-time-properties) list `props` may specify `cache-hints`.  
-The template parameter `Op` specifies the atomic operation applied to the memory.  
-The template parameter `T` specifies the type of the elements used in the atomic_update operation. Only 2,4,8-byte types are supported.  
+and up-to-32-bit integer elements for `(acc-*)` in [stateful](#statelessstateful-memory-mode) mode.
+The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the corresponding memory location is not updated.
+`(usm-*)`, `(acc-*)`: The optional [compile-time properties](#compile-time-properties) list `props` may specify `cache-hints`.
+The template parameter `Op` specifies the atomic operation applied to the memory.
+The template parameter `T` specifies the type of the elements used in the atomic_update operation. Only 2,4,8-byte types are supported.
 The template parameter `N` is the number of elements being atomically updated.
 
 ### Restrictions
@@ -873,7 +1007,7 @@ The `byte_offsets` is a vector of any integral type elements, limited in [statef
 
 `(acc-pf-7,8,9,10)`: Prefetches a linear block of memory addressed by the accessor `acc` and the optional `byte-offset` parameter, which is 64-bit in [stateless](#statelessstateful-memory-mode) mode(default), and 32-bit in [stateful](#statelessstateful-memory-mode) mode.
 
-`(usm-pf-1,2,3,4,5,6)`, `(acc-pf-1,2,3,4,5,6)`: The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the corresponding memory location is not prefetched.  
+`(usm-pf-1,2,3,4,5,6)`, `(acc-pf-1,2,3,4,5,6)`: The optional parameter `mask` provides a `simd_mask`. If some element in `mask` is zero, then the corresponding memory location is not prefetched.
 `(usm-pf-7,8,9,10)`, `(acc-pf-7,8,9,10)`: The optional parameter `mask` provides 1-element
 `simd_mask`. If it is zero, then the whole prefetch operation is skipped.
 

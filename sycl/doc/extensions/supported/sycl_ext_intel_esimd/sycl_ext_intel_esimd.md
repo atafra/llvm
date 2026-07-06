@@ -409,6 +409,18 @@ usual `gather` and `scatter`, but allow to access the most memory in one call -
 4 elements (as if they were RGBA channels of a pixel) per each offset in the
 offsets vector. Per-offset masking is also support, plus per-channel
 compile-time constant mask can be specified to further refine masking.
+- Typed pixel (image) access - `gather_rgba_typed`, `scatter_rgba_typed`. These
+are the typed-surface counterparts of `gather_rgba`/`scatter_rgba`: instead of
+addressing a buffer by byte offsets they address a bound `sycl::image` by integer
+pixel coordinates (`u`, `v`, `r`), reading or writing up to 4 channels per pixel
+with the hardware performing the image's format handling. They correspond to the
+`read_typed`/`write_typed` operations of the CM language and are supported on
+**pre-Xe2** devices. On **Xe2 and later** the LSC variants
+`experimental::esimd::lsc_gather_rgba_typed`, `lsc_scatter_rgba_typed` and
+`lsc_prefetch_rgba_typed` (equivalents of the CM
+`cm_load4_typed`/`cm_store4_typed`/`cm_prefetch4_typed` operations) provide the
+same functionality, additionally supporting cache hints and a level-of-detail
+coordinate.
 - Media block access - `media_block_load` , `media_block_store`. These are the
 most efficient memory accesses on Intel GPU architectures up to Gen9 generation.
 They go through extra layer of faster cache.
@@ -648,7 +660,7 @@ ESIMD supports the following non-standard math functions implemented in hardware
 DPAS is the matrix multiply-add-and-accumulate operation performed on limited size matrices/tiles.
 This API requires XMX (Xe Matrix eXtension) to be supported by the target GPU.
 
-The input and output matrix/tile dimensions are parametrizable to certain extent and depend on the element types of operands and the target device.   
+The input and output matrix/tile dimensions are parametrizable to certain extent and depend on the element types of operands and the target device.
 The operands and returns of DPAS API may require vertical or horizontal packing or unpacking. Please see [more details](#input-and-output-matrices-representation-as-simd-vectors) below.
 
 #### DPAS API definition
@@ -788,7 +800,7 @@ For input elements with bit-size 8-bit or more, the packing is automatic and any
 | c0 | c1	| c2 | c3 | c4 | c5	| c6 | c7 |
 | d0 | d1	| d2 | d3 | d4 | d5	| d6 | d7 |
 
-has the corresponding input `simd` operand (or output `simd` result) represented as simple as {a0, a1, a2, a3, a4, a5, a6, a7, a8, b0, b1, ..., b7, c0, c1, ..., c7, d0, ..., d7}.  
+has the corresponding input `simd` operand (or output `simd` result) represented as simple as {a0, a1, a2, a3, a4, a5, a6, a7, a8, b0, b1, ..., b7, c0, c1, ..., c7, d0, ..., d7}.
 Matrices with elements smaller than 8-bit are packed to 1-,2-,or 4-byte elements. For example, the operand `A` representing a 4x64 `unpacked` matrix of 4-bit unsigned integers:
 |||||||
 |--- |--- |--- |--- |---  |--- |
