@@ -108,6 +108,8 @@ ur_result_t urBindlessImagesWaitExternalSemaphoreExp(
     ur_queue_handle_t hQueue, ur_exp_external_semaphore_handle_t hSemaphore,
     bool hasValue, uint64_t waitValue, uint32_t numEventsInWaitList,
     const ur_event_handle_t *phEventWaitList, ur_event_handle_t *phEvent) {
+  std::scoped_lock<ur_shared_mutex> Lock(hQueue->Mutex);
+
   auto UrPlatform = hQueue->Context->getPlatform();
   if (UrPlatform->ZeExternalSemaphoreExt.Supported == false) {
     UR_LOG_LEGACY(ERR,
@@ -118,8 +120,16 @@ ur_result_t urBindlessImagesWaitExternalSemaphoreExp(
 
   bool UseCopyEngine = false;
 
-  // We want to batch these commands to avoid extra submissions (costly)
-  bool OkToBatch = true;
+  // External semaphore operations are not portable on regular command lists:
+  // drivers may require waits and signals to be at strict submission
+  // boundaries. Submit them through an immediate command list instead. Flush
+  // regular batches first so dependencies cannot refer to unsubmitted work.
+  bool ForceImmediate = !hQueue->UsingImmCmdLists;
+  if (ForceImmediate) {
+    UR_CALL(hQueue->executeAllOpenCommandLists());
+  }
+
+  bool OkToBatch = false;
 
   ur_ze_event_list_t TmpWaitList;
   UR_CALL(TmpWaitList.createAndRetainUrZeEventList(
@@ -129,19 +139,23 @@ ur_result_t urBindlessImagesWaitExternalSemaphoreExp(
   ur_command_list_ptr_t CommandList{};
   UR_CALL(hQueue->Context->getAvailableCommandList(
       hQueue, CommandList, UseCopyEngine, numEventsInWaitList, phEventWaitList,
-      OkToBatch, nullptr /*ForcedCmdQueue*/));
+      OkToBatch, nullptr /*ForcedCmdQueue*/, true /*ForceImmediate*/));
 
   ze_event_handle_t ZeEvent = nullptr;
   ur_event_handle_t InternalEvent;
   bool IsInternal = phEvent == nullptr;
   ur_event_handle_t *Event = phEvent ? phEvent : &InternalEvent;
-  UR_CALL(createEventAndAssociateQueue(hQueue, Event,
-                                       UR_COMMAND_EXTERNAL_SEMAPHORE_WAIT_EXP,
-                                       CommandList, IsInternal,
-                                       /*IsMultiDevice*/ false));
-  UR_CALL(setSignalEvent(hQueue, UseCopyEngine, &ZeEvent, Event,
-                         numEventsInWaitList, phEventWaitList,
-                         CommandList->second.ZeQueue));
+  UR_CALL(createEventAndAssociateQueue(
+      hQueue, Event, UR_COMMAND_EXTERNAL_SEMAPHORE_WAIT_EXP, CommandList,
+      IsInternal,
+      /*IsMultiDevice*/ false, std::nullopt, !ForceImmediate));
+  // The event bridges two different native submission mechanisms. It must not
+  // participate in the same-list discarded-event reset optimization: the next
+  // regular list needs to wait on its signaled state.
+  if (ForceImmediate) {
+    (*Event)->IsDiscarded = false;
+  }
+  ZeEvent = (*Event)->ZeEvent;
   (*Event)->WaitList = TmpWaitList;
 
   const auto &ZeCommandList = CommandList->first;
@@ -166,6 +180,8 @@ ur_result_t urBindlessImagesSignalExternalSemaphoreExp(
     ur_queue_handle_t hQueue, ur_exp_external_semaphore_handle_t hSemaphore,
     bool hasValue, uint64_t signalValue, uint32_t numEventsInWaitList,
     const ur_event_handle_t *phEventWaitList, ur_event_handle_t *phEvent) {
+  std::scoped_lock<ur_shared_mutex> Lock(hQueue->Mutex);
+
   auto UrPlatform = hQueue->Context->getPlatform();
   if (UrPlatform->ZeExternalSemaphoreExt.Supported == false) {
     UR_LOG_LEGACY(ERR,
@@ -176,8 +192,14 @@ ur_result_t urBindlessImagesSignalExternalSemaphoreExp(
 
   bool UseCopyEngine = false;
 
-  // We want to batch these commands to avoid extra submissions (costly)
-  bool OkToBatch = true;
+  // See the wait path above. Keep regular commands and external semaphore
+  // operations on separate submission mechanisms.
+  bool ForceImmediate = !hQueue->UsingImmCmdLists;
+  if (ForceImmediate) {
+    UR_CALL(hQueue->executeAllOpenCommandLists());
+  }
+
+  bool OkToBatch = false;
 
   ur_ze_event_list_t TmpWaitList;
   UR_CALL(TmpWaitList.createAndRetainUrZeEventList(
@@ -187,19 +209,20 @@ ur_result_t urBindlessImagesSignalExternalSemaphoreExp(
   ur_command_list_ptr_t CommandList{};
   UR_CALL(hQueue->Context->getAvailableCommandList(
       hQueue, CommandList, UseCopyEngine, numEventsInWaitList, phEventWaitList,
-      OkToBatch, nullptr /*ForcedCmdQueue*/));
+      OkToBatch, nullptr /*ForcedCmdQueue*/, true /*ForceImmediate*/));
 
   ze_event_handle_t ZeEvent = nullptr;
   ur_event_handle_t InternalEvent;
   bool IsInternal = phEvent == nullptr;
   ur_event_handle_t *Event = phEvent ? phEvent : &InternalEvent;
-  UR_CALL(createEventAndAssociateQueue(hQueue, Event,
-                                       UR_COMMAND_EXTERNAL_SEMAPHORE_SIGNAL_EXP,
-                                       CommandList, IsInternal,
-                                       /*IsMultiDevice*/ false));
-  UR_CALL(setSignalEvent(hQueue, UseCopyEngine, &ZeEvent, Event,
-                         numEventsInWaitList, phEventWaitList,
-                         CommandList->second.ZeQueue));
+  UR_CALL(createEventAndAssociateQueue(
+      hQueue, Event, UR_COMMAND_EXTERNAL_SEMAPHORE_SIGNAL_EXP, CommandList,
+      IsInternal,
+      /*IsMultiDevice*/ false, std::nullopt, !ForceImmediate));
+  if (ForceImmediate) {
+    (*Event)->IsDiscarded = false;
+  }
+  ZeEvent = (*Event)->ZeEvent;
   (*Event)->WaitList = TmpWaitList;
 
   const auto &ZeCommandList = CommandList->first;

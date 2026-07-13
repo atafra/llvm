@@ -749,9 +749,9 @@ ur_result_t ur_context_handle_t_::getAvailableCommandList(
     ur_queue_handle_t Queue, ur_command_list_ptr_t &CommandList,
     bool UseCopyEngine, uint32_t NumEventsInWaitList,
     const ur_event_handle_t *EventWaitList, bool AllowBatching,
-    ze_command_queue_handle_t *ForcedCmdQueue) {
+    ze_command_queue_handle_t *ForcedCmdQueue, bool ForceImmediate) {
   // Immediate commandlists have been pre-allocated and are always available.
-  if (Queue->UsingImmCmdLists) {
+  if (Queue->UsingImmCmdLists || ForceImmediate) {
     CommandList = Queue->getQueueGroup(UseCopyEngine).getImmCmdList();
     if (CommandList->second.EventList.size() >=
         Queue->getImmdCmmdListsEventCleanupThreshold()) {
@@ -894,6 +894,12 @@ ur_result_t ur_context_handle_t_::getAvailableCommandList(
   // command list & fence are reset and we return.
   for (auto it = Queue->CommandListMap.begin();
        it != Queue->CommandListMap.end(); ++it) {
+    // Auxiliary immediate command lists do not have fences and cannot be
+    // recycled as regular lists. They may coexist in this map when a regular
+    // queue uses an immediate list for external semaphore operations.
+    if (it->second.IsImmediate)
+      continue;
+
     // Make sure this is the command list type needed.
     if (UseCopyEngine != it->second.isCopy(Queue))
       continue;

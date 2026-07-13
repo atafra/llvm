@@ -712,7 +712,8 @@ struct ur_queue_handle_t_ : ur_object {
 ur_result_t createEventAndAssociateQueue(
     ur_queue_handle_t Queue, ur_event_handle_t *Event, ur_command_t CommandType,
     ur_command_list_ptr_t CommandList, bool IsInternal, bool IsMultiDevice,
-    std::optional<bool> HostVisible = std::nullopt);
+    std::optional<bool> HostVisible = std::nullopt,
+    bool UseQueueEventFeatures = true);
 
 // This helper function checks to see if an event for a command can be included
 // at the end of a command list batch. This will only be true if the event does

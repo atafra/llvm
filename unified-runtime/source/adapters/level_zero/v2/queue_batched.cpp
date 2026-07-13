@@ -841,11 +841,19 @@ ur_result_t ur_queue_batched_t::bindlessImagesWaitExternalSemaphoreExp(
       wait_list_view(phEventWaitList, numEventsInWaitList, this);
 
   auto lockedBatch = currentCmdLists.lock();
-  markIssuedCommandInBatch(lockedBatch);
+  // Keep user work on regular command lists. The batch manager already owns
+  // an in-order immediate list for submitting those lists, so first enqueue
+  // pending regular work and then append only the external semaphore operation
+  // to that same timeline. No host synchronization is required.
+  if (!lockedBatch->isGraphCaptureActive() &&
+      !lockedBatch->isActiveBatchEmpty()) {
+    UR_CALL(renewBatchUnlocked(lockedBatch));
+  }
 
-  return lockedBatch->getListManager().bindlessImagesWaitExternalSemaphoreExp(
-      hSemaphore, hasWaitValue, waitValue, waitListView,
-      getEvent(lockedBatch, phEvent));
+  return lockedBatch->getImmediateManager()
+      .bindlessImagesWaitExternalSemaphoreExp(
+          hSemaphore, hasWaitValue, waitValue, waitListView,
+          createEventIfRequested(eventPoolImmediate.get(), phEvent, this));
 }
 
 ur_result_t ur_queue_batched_t::bindlessImagesSignalExternalSemaphoreExp(
@@ -856,11 +864,17 @@ ur_result_t ur_queue_batched_t::bindlessImagesSignalExternalSemaphoreExp(
       wait_list_view(phEventWaitList, numEventsInWaitList, this);
 
   auto lockedBatch = currentCmdLists.lock();
-  markIssuedCommandInBatch(lockedBatch);
+  // See the wait path above. Pending regular work remains a regular batch; the
+  // external signal alone is appended to the internal submission timeline.
+  if (!lockedBatch->isGraphCaptureActive() &&
+      !lockedBatch->isActiveBatchEmpty()) {
+    UR_CALL(renewBatchUnlocked(lockedBatch));
+  }
 
-  return lockedBatch->getListManager().bindlessImagesSignalExternalSemaphoreExp(
-      hSemaphore, hasSignalValue, signalValue, waitListView,
-      getEvent(lockedBatch, phEvent));
+  return lockedBatch->getImmediateManager()
+      .bindlessImagesSignalExternalSemaphoreExp(
+          hSemaphore, hasSignalValue, signalValue, waitListView,
+          createEventIfRequested(eventPoolImmediate.get(), phEvent, this));
 }
 
 // In case of queues with batched submissions, which use regular command lists

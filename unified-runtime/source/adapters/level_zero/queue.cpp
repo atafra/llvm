@@ -235,7 +235,7 @@ ur_result_t CleanupEventsInImmCmdLists(ur_queue_handle_t UrQueue,
                                        bool QueueLocked, bool QueueSynced,
                                        ur_event_handle_t CompletedEvent) {
   // Handle only immediate command lists here.
-  if (!UrQueue || !UrQueue->UsingImmCmdLists)
+  if (!UrQueue)
     return UR_RESULT_SUCCESS;
 
   ur_event_handle_t_ *UrCompletedEvent =
@@ -258,6 +258,8 @@ ur_result_t CleanupEventsInImmCmdLists(ur_queue_handle_t UrQueue,
       UrQueue->LastCommandEvent = nullptr;
       for (auto &&It = UrQueue->CommandListMap.begin();
            It != UrQueue->CommandListMap.end(); ++It) {
+        if (!It->second.IsImmediate)
+          continue;
         UR_CALL(UrQueue->resetCommandList(It, true, EventListToCleanup,
                                           false /* CheckStatus */));
       }
@@ -290,6 +292,8 @@ ur_result_t CleanupEventsInImmCmdLists(ur_queue_handle_t UrQueue,
       // Fallback to resetCommandList over all command lists.
       for (auto &&It = UrQueue->CommandListMap.begin();
            It != UrQueue->CommandListMap.end(); ++It) {
+        if (!It->second.IsImmediate)
+          continue;
         UR_CALL(UrQueue->resetCommandList(It, true, EventListToCleanup,
                                           true /* CheckStatus */));
       }
@@ -308,10 +312,10 @@ ur_result_t CleanupEventsInImmCmdLists(ur_queue_handle_t UrQueue,
 ur_result_t resetCommandLists(ur_queue_handle_t Queue) {
   // Handle immediate command lists here, they don't need to be reset and we
   // only need to cleanup events.
+  UR_CALL(CleanupEventsInImmCmdLists(Queue, true /*QueueLocked*/,
+                                     false /*QueueSynced*/,
+                                     nullptr /*CompletedEvent*/));
   if (Queue->UsingImmCmdLists) {
-    UR_CALL(CleanupEventsInImmCmdLists(Queue, true /*QueueLocked*/,
-                                       false /*QueueSynced*/,
-                                       nullptr /*CompletedEvent*/));
     return UR_RESULT_SUCCESS;
   }
 
@@ -332,6 +336,8 @@ ur_result_t resetCommandLists(ur_queue_handle_t Queue) {
        it != Queue->CommandListMap.end(); ++it) {
     // Immediate commandlists don't use a fence and are handled separately
     // above.
+    if (it->second.IsImmediate)
+      continue;
     assert(it->second.ZeFence != nullptr);
     // It is possible that the fence was already noted as signalled and
     // reset. In that case the ZeFenceInUse flag will be false.
@@ -414,27 +420,25 @@ ur_result_t urQueueGetInfo(
     for (const auto &QueueMap :
          {Queue->ComputeQueueGroupsByTID, Queue->CopyQueueGroupsByTID}) {
       for (const auto &QueueGroup : QueueMap) {
-        if (Queue->UsingImmCmdLists) {
-          // Immediate command lists are not associated with any Level Zero
-          // queue, that's why we have to check status of events in each
-          // immediate command list. Start checking from the end and exit early
-          // if some event is not completed.
-          for (const auto &ImmCmdList : QueueGroup.second.ImmCmdLists) {
-            if (ImmCmdList == Queue->CommandListMap.end())
-              continue;
+        // Immediate command lists are not associated with any Level Zero
+        // queue, so check their events even when they are used only as a
+        // bridge by an otherwise regular queue.
+        for (const auto &ImmCmdList : QueueGroup.second.ImmCmdLists) {
+          if (ImmCmdList == Queue->CommandListMap.end())
+            continue;
 
-            const auto &EventList = ImmCmdList->second.EventList;
-            for (auto It = EventList.crbegin(); It != EventList.crend(); It++) {
-              ze_result_t ZeResult =
-                  ZE_CALL_NOCHECK(zeEventQueryStatus, ((*It)->ZeEvent));
-              if (ZeResult == ZE_RESULT_NOT_READY) {
-                return ReturnValue(false);
-              } else if (ZeResult != ZE_RESULT_SUCCESS) {
-                return ze2urResult(ZeResult);
-              }
+          const auto &EventList = ImmCmdList->second.EventList;
+          for (auto It = EventList.crbegin(); It != EventList.crend(); It++) {
+            ze_result_t ZeResult =
+                ZE_CALL_NOCHECK(zeEventQueryStatus, ((*It)->ZeEvent));
+            if (ZeResult == ZE_RESULT_NOT_READY) {
+              return ReturnValue(false);
+            } else if (ZeResult != ZE_RESULT_SUCCESS) {
+              return ze2urResult(ZeResult);
             }
           }
-        } else {
+        }
+        if (!Queue->UsingImmCmdLists) {
           for (const auto &ZeQueue : QueueGroup.second.ZeQueues) {
             if (!ZeQueue)
               continue;
@@ -668,7 +672,7 @@ ur_result_t urQueueRelease(
           ZeResult = ZE_RESULT_ERROR_UNINITIALIZED;
         }
       }
-      if (Queue->UsingImmCmdLists && Queue->OwnZeCommandQueue) {
+      if (it->second.IsImmediate && Queue->OwnZeCommandQueue) {
         std::scoped_lock<ur_mutex> Lock(
             Queue->Context->ZeCommandListCacheMutex);
         const ur_command_list_info_t &MapEntry = it->second;
@@ -858,6 +862,7 @@ ur_result_t urQueueFinish(
   } else {
     std::unique_lock<ur_shared_mutex> Lock(Queue->Mutex);
     std::vector<ze_command_queue_handle_t> ZeQueues;
+    std::vector<ze_command_list_handle_t> ZeImmediateLists;
 
     // execute any command list that may still be open.
     UR_CALL(Queue->executeAllOpenCommandLists());
@@ -865,10 +870,15 @@ ur_result_t urQueueFinish(
     // Make a copy of queues to sync and release the lock.
     for (auto &QueueMap :
          {Queue->ComputeQueueGroupsByTID, Queue->CopyQueueGroupsByTID})
-      for (auto &QueueGroup : QueueMap)
+      for (auto &QueueGroup : QueueMap) {
         std::copy(QueueGroup.second.ZeQueues.begin(),
                   QueueGroup.second.ZeQueues.end(),
                   std::back_inserter(ZeQueues));
+        for (auto &ImmCmdList : QueueGroup.second.ImmCmdLists) {
+          if (ImmCmdList != Queue->CommandListMap.end())
+            ZeImmediateLists.push_back(ImmCmdList->first);
+        }
+      }
 
     // Remember the last command's event.
     auto LastCommandEvent = Queue->LastCommandEvent;
@@ -890,6 +900,9 @@ ur_result_t urQueueFinish(
     for (auto &ZeQueue : ZeQueues) {
       if (ZeQueue)
         ZE2UR_CALL(zeHostSynchronize, (ZeQueue));
+    }
+    for (auto &ZeImmediateList : ZeImmediateLists) {
+      ZE2UR_CALL(zeCommandListHostSynchronize, (ZeImmediateList, UINT64_MAX));
     }
 
     // Prevent unneeded already finished events to show up in the wait list.
@@ -1179,10 +1192,8 @@ ur_queue_handle_t_::ur_queue_handle_t_(
   ComputeQueueGroup.ZeQueues = ComputeQueues;
   // Create space to hold immediate commandlists corresponding to the
   // ZeQueues
-  if (UsingImmCmdLists) {
-    ComputeQueueGroup.ImmCmdLists = std::vector<ur_command_list_ptr_t>(
-        ComputeQueueGroup.ZeQueues.size(), CommandListMap.end());
-  }
+  ComputeQueueGroup.ImmCmdLists = std::vector<ur_command_list_ptr_t>(
+      ComputeQueueGroup.ZeQueues.size(), CommandListMap.end());
   if (ComputeQueueGroupInfo.ZeIndex >= 0) {
     // Sub-sub-device
 
@@ -1211,13 +1222,6 @@ ur_queue_handle_t_::ur_queue_handle_t_(
       die("No compute queue available/allowed.");
     }
   }
-  if (UsingImmCmdLists) {
-    // Create space to hold immediate commandlists corresponding to the
-    // ZeQueues
-    ComputeQueueGroup.ImmCmdLists = std::vector<ur_command_list_ptr_t>(
-        ComputeQueueGroup.ZeQueues.size(), CommandListMap.end());
-  }
-
   ComputeQueueGroupsByTID.set(ComputeQueueGroup);
 
   // Copy group initialization.
@@ -1239,10 +1243,8 @@ ur_queue_handle_t_::ur_queue_handle_t_(
       CopyQueueGroup.NextIndex = CopyQueueGroup.LowerIndex;
       // Create space to hold immediate commandlists corresponding to the
       // ZeQueues
-      if (UsingImmCmdLists) {
-        CopyQueueGroup.ImmCmdLists = std::vector<ur_command_list_ptr_t>(
-            CopyQueueGroup.ZeQueues.size(), CommandListMap.end());
-      }
+      CopyQueueGroup.ImmCmdLists = std::vector<ur_command_list_ptr_t>(
+          CopyQueueGroup.ZeQueues.size(), CommandListMap.end());
     }
   }
   CopyQueueGroupsByTID.set(CopyQueueGroup);
@@ -1357,7 +1359,7 @@ ur_queue_handle_t_::executeCommandList(ur_command_list_ptr_t CommandList,
 
   this->LastUsedCommandList = CommandList;
 
-  if (!UsingImmCmdLists) {
+  if (!CommandList->second.IsImmediate) {
     // Batch if allowed to, but don't batch if we know there are no kernels
     // from this queue that are currently executing.  This is intended to get
     // kernels started as soon as possible when there are no kernels from this
@@ -1411,7 +1413,7 @@ ur_queue_handle_t_::executeCommandList(ur_command_list_ptr_t CommandList,
     CaptureIndirectAccesses();
   }
 
-  if (!UsingImmCmdLists) {
+  if (!CommandList->second.IsImmediate) {
     // In this mode all inner-batch events have device visibility only,
     // and we want the last command in the batch to signal a host-visible
     // event that anybody waiting for any event in the batch will
@@ -1548,7 +1550,7 @@ ur_queue_handle_t_::executeCommandList(ur_command_list_ptr_t CommandList,
 
   // Check global control to make every command blocking for debugging.
   if (IsBlocking || (UrL0Serialize & UrL0SerializeBlock) != 0) {
-    if (UsingImmCmdLists) {
+    if (CommandList->second.IsImmediate) {
       UR_CALL(synchronize());
     } else {
       // Wait until command lists attached to the command queue are executed.
@@ -1797,15 +1799,13 @@ ur_result_t ur_queue_handle_t_::synchronize() {
       // so they can be reused later
       for (auto &QueueMap : {ComputeQueueGroupsByTID, CopyQueueGroupsByTID}) {
         for (auto &QueueGroup : QueueMap) {
-          if (UsingImmCmdLists) {
-            for (auto &ImmCmdList : QueueGroup.second.ImmCmdLists) {
-              if (ImmCmdList == this->CommandListMap.end())
-                continue;
-              // Cleanup all events from the synced command list.
-              CleanupEventListFromResetCmdList(ImmCmdList->second.EventList,
-                                               true);
-              ImmCmdList->second.EventList.clear();
-            }
+          for (auto &ImmCmdList : QueueGroup.second.ImmCmdLists) {
+            if (ImmCmdList == this->CommandListMap.end())
+              continue;
+            // Cleanup all events from the synced command list.
+            CleanupEventListFromResetCmdList(ImmCmdList->second.EventList,
+                                             true);
+            ImmCmdList->second.EventList.clear();
           }
         }
       }
@@ -1813,10 +1813,9 @@ ur_result_t ur_queue_handle_t_::synchronize() {
       // Otherwise sync all L0 queues/immediate command-lists.
       for (auto &QueueMap : {ComputeQueueGroupsByTID, CopyQueueGroupsByTID}) {
         for (auto &QueueGroup : QueueMap) {
-          if (UsingImmCmdLists) {
-            for (auto &ImmCmdList : QueueGroup.second.ImmCmdLists)
-              UR_CALL(syncImmCmdList(this, ImmCmdList));
-          } else {
+          for (auto &ImmCmdList : QueueGroup.second.ImmCmdLists)
+            UR_CALL(syncImmCmdList(this, ImmCmdList));
+          if (!UsingImmCmdLists) {
             for (auto &ZeQueue : QueueGroup.second.ZeQueues)
               if (ZeQueue) {
                 if (UrL0QueueSyncNonBlocking) {
@@ -1946,12 +1945,10 @@ ur_result_t setSignalEvent(ur_queue_handle_t Queue, bool UseCopyEngine,
 //        visible pool.
 // \param HostVisible tells if the event must be created in the
 //        host-visible pool. If not set then this function will decide.
-ur_result_t createEventAndAssociateQueue(ur_queue_handle_t Queue,
-                                         ur_event_handle_t *Event,
-                                         ur_command_t CommandType,
-                                         ur_command_list_ptr_t CommandList,
-                                         bool IsInternal, bool IsMultiDevice,
-                                         std::optional<bool> HostVisible) {
+ur_result_t createEventAndAssociateQueue(
+    ur_queue_handle_t Queue, ur_event_handle_t *Event, ur_command_t CommandType,
+    ur_command_list_ptr_t CommandList, bool IsInternal, bool IsMultiDevice,
+    std::optional<bool> HostVisible, bool UseQueueEventFeatures) {
 
   if (!HostVisible.has_value()) {
     // Internal/discarded events do not need host-scope visibility.
@@ -1959,15 +1956,18 @@ ur_result_t createEventAndAssociateQueue(ur_queue_handle_t Queue,
   }
 
   // If event is discarded then try to get event from the queue cache.
-  *Event = IsInternal ? Queue->getEventFromQueueCache(IsMultiDevice,
-                                                      HostVisible.value())
-                      : nullptr;
+  *Event =
+      IsInternal && UseQueueEventFeatures
+          ? Queue->getEventFromQueueCache(IsMultiDevice, HostVisible.value())
+          : nullptr;
 
   if (*Event == nullptr)
     UR_CALL(EventCreate(
         Queue->Context, Queue, IsMultiDevice, HostVisible.value(), Event,
-        Queue->CounterBasedEventsEnabled, false /*ForceDisableProfiling*/,
-        Queue->InterruptBasedEventsEnabled, IsInternal));
+        UseQueueEventFeatures && Queue->CounterBasedEventsEnabled,
+        false /*ForceDisableProfiling*/,
+        UseQueueEventFeatures && Queue->InterruptBasedEventsEnabled,
+        IsInternal));
 
   (*Event)->UrQueue = Queue;
   (*Event)->CommandType = CommandType;
@@ -2526,6 +2526,8 @@ ur_command_list_ptr_t &ur_queue_handle_t_::ur_queue_group_t::getImmCmdList() {
                   ->ZeComputeCommandListCache[Queue->Device->ZeDevice];
     for (auto ZeCommandListIt = ZeCommandListCache.begin();
          ZeCommandListIt != ZeCommandListCache.end(); ++ZeCommandListIt) {
+      if (!ZeCommandListIt->second.IsImmediate)
+        continue;
       const auto &Desc = (*ZeCommandListIt).second.ZeQueueDesc;
       if (Desc.index == ZeCommandQueueDesc.index &&
           Desc.flags == ZeCommandQueueDesc.flags &&

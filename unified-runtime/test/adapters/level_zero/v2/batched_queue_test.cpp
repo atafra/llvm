@@ -36,6 +36,33 @@
 #include <optional>
 #include <vector>
 
+namespace {
+
+ze_command_list_handle_t externalWaitCommandList = nullptr;
+ze_command_list_handle_t externalSignalCommandList = nullptr;
+
+ze_result_t ZE_APICALL mockAppendWaitExternalSemaphore(
+    ze_command_list_handle_t hCommandList, uint32_t,
+    ze_external_semaphore_ext_handle_t *,
+    ze_external_semaphore_wait_params_ext_t *, ze_event_handle_t hSignalEvent,
+    uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) {
+  externalWaitCommandList = hCommandList;
+  return zeCommandListAppendBarrier(hCommandList, hSignalEvent, numWaitEvents,
+                                    phWaitEvents);
+}
+
+ze_result_t ZE_APICALL mockAppendSignalExternalSemaphore(
+    ze_command_list_handle_t hCommandList, uint32_t,
+    ze_external_semaphore_ext_handle_t *,
+    ze_external_semaphore_signal_params_ext_t *, ze_event_handle_t hSignalEvent,
+    uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) {
+  externalSignalCommandList = hCommandList;
+  return zeCommandListAppendBarrier(hCommandList, hSignalEvent, numWaitEvents,
+                                    phWaitEvents);
+}
+
+} // namespace
+
 const ur_dditable_t *ur::level_zero::ddi_getter::value() {
   // Return a blank dditable
   static ur_dditable_t table{};
@@ -288,6 +315,67 @@ TEST_P(urBatchedQueueTest, IncreaseGenerationNumberAfterQueueFinish) {
   ASSERT_SUCCESS(urEventRelease(event1));
   ASSERT_SUCCESS(urEventRelease(event2));
   ASSERT_SUCCESS(urEventRelease(event3));
+}
+
+TEST_P(urBatchedQueueTest,
+       ExternalSemaphoresPreserveRegularWorkloadSubmission) {
+  std::vector<uint8_t> data(buffer_size, 42);
+
+  ur_event_handle_t eventBeforeWait = nullptr;
+  ASSERT_SUCCESS(urEnqueueMemBufferWrite(queue1, buffer, false, 0, buffer_size,
+                                         data.data(), 0, nullptr,
+                                         &eventBeforeWait));
+  ASSERT_NE(eventBeforeWait->getBatch(), std::nullopt);
+
+  ur_native_handle_t nativeQueue = 0;
+  ASSERT_SUCCESS(urQueueGetNativeHandle(queue1, nullptr, &nativeQueue));
+  auto immediateList = reinterpret_cast<ze_command_list_handle_t>(nativeQueue);
+
+  auto &externalSemaphoreExt = device->Platform->ZeExternalSemaphoreExt;
+  const auto savedExternalSemaphoreExt = externalSemaphoreExt;
+  externalSemaphoreExt.Supported = true;
+  externalSemaphoreExt.zexCommandListAppendWaitExternalSemaphoresExp =
+      mockAppendWaitExternalSemaphore;
+  externalSemaphoreExt.zexCommandListAppendSignalExternalSemaphoresExp =
+      mockAppendSignalExternalSemaphore;
+
+  auto semaphore = reinterpret_cast<ur_exp_external_semaphore_handle_t>(1);
+  auto waitResult = urBindlessImagesWaitExternalSemaphoreExp(
+      queue1, semaphore, false, 0, 0, nullptr, nullptr);
+
+  ur_event_handle_t eventBetweenSemaphores = nullptr;
+  auto middleResult =
+      urEnqueueMemBufferWrite(queue1, buffer, false, 0, buffer_size,
+                              data.data(), 0, nullptr, &eventBetweenSemaphores);
+
+  auto signalResult = urBindlessImagesSignalExternalSemaphoreExp(
+      queue1, semaphore, false, 0, 0, nullptr, nullptr);
+
+  ur_event_handle_t eventAfterSignal = nullptr;
+  auto afterResult =
+      urEnqueueMemBufferWrite(queue1, buffer, false, 0, buffer_size,
+                              data.data(), 0, nullptr, &eventAfterSignal);
+
+  externalSemaphoreExt = savedExternalSemaphoreExt;
+
+  ASSERT_SUCCESS(waitResult);
+  ASSERT_SUCCESS(middleResult);
+  ASSERT_SUCCESS(signalResult);
+  ASSERT_SUCCESS(afterResult);
+  EXPECT_EQ(externalWaitCommandList, immediateList);
+  EXPECT_EQ(externalSignalCommandList, immediateList);
+
+  ASSERT_NE(eventBetweenSemaphores->getBatch(), std::nullopt);
+  ASSERT_NE(eventAfterSignal->getBatch(), std::nullopt);
+  EXPECT_EQ(eventBetweenSemaphores->getBatch().value(),
+            eventBeforeWait->getBatch().value() + 1);
+  EXPECT_EQ(eventAfterSignal->getBatch().value(),
+            eventBetweenSemaphores->getBatch().value() + 1);
+
+  ASSERT_SUCCESS(urQueueFinish(queue1));
+  ASSERT_SUCCESS(urEventRelease(eventBeforeWait));
+  ASSERT_SUCCESS(urEventRelease(eventBetweenSemaphores));
+  ASSERT_SUCCESS(urEventRelease(eventAfterSignal));
 }
 
 //   enqueue cmdbuff (empty batch)
